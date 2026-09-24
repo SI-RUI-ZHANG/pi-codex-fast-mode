@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added
+
+- Codex Fast-mode eligibility for `gpt-6-sol`, `gpt-6-luna`, and `gpt-6-astra` only; unlisted GPT-6 IDs are excluded. GPT-6 notifications show the published credit estimate without a numeric speed claim.
+
 ## [0.2.0] — 2026-07-30
 
 ### Changed

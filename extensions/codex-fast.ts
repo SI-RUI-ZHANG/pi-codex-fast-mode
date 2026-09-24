@@ -5,9 +5,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
 	applyFastServiceTier,
-	EXPECTED_SPEED_MULTIPLIER,
 	FAST_SERVICE_TIER,
 	getFastCreditMultiplier,
+	getFastSpeedMultiplier,
 	isFastEligible,
 	type ModelDescriptor,
 	modelReference,
@@ -61,7 +61,11 @@ function enabledMessage(model: ModelDescriptor | undefined): string {
 	if (!creditMultiplier) {
 		return `Fast preference enabled, but ${modelReference(model)} is not eligible; requests remain unchanged.`;
 	}
-	return `Fast mode enabled for ${modelReference(model)}: ~${EXPECTED_SPEED_MULTIPLIER}× speed and ~${creditMultiplier}× credits. Requests ask for service_tier=${FAST_SERVICE_TIER}; the backend may downgrade them.`;
+	const speedMultiplier = getFastSpeedMultiplier(model);
+	const estimate = speedMultiplier
+		? `~${speedMultiplier}× speed and ~${creditMultiplier}× credits`
+		: `~${creditMultiplier}× credits`;
+	return `Fast mode enabled for ${modelReference(model)}: ${estimate}. Requests ask for service_tier=${FAST_SERVICE_TIER}; the backend may downgrade them.`;
 }
 
 export function registerCodexFastMode(

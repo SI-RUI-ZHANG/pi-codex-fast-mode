@@ -129,7 +129,53 @@ describe("Codex Fast mode extension", () => {
 		expect((await loadFastState(harness.agentDir)).state.enabled).toBe(true);
 		expect(harness.statuses.get("codex-fast-mode")).toBe("⚡ fast");
 		expect(harness.notifications.at(-1)?.message).toContain("~2.5× credits");
+		expect(harness.notifications.at(-1)?.message).toContain("~1.5× speed");
 	});
+
+	it.each(["gpt-6-sol", "gpt-6-luna", "gpt-6-astra"])(
+		"enables Fast mode for %s without an unsupported speed claim",
+		async (id) => {
+			const harness = await createHarness({ modelId: id });
+			await harness.emit("session_start", { type: "session_start" });
+			await harness.command.handler("on", harness.context);
+
+			const message = harness.notifications.at(-1)?.message;
+			expect(message).toContain("~2.5× credits");
+			expect(message).not.toContain("× speed");
+			expect(message).toContain("the backend may downgrade them");
+			expect(harness.statuses.get("codex-fast-mode")).toBe("⚡ fast");
+			const payload = { model: id };
+			expect(
+				await harness.emit("before_provider_request", {
+					type: "before_provider_request",
+					payload,
+				}),
+			).toEqual({ model: id, service_tier: "priority" });
+			expect(payload).not.toHaveProperty("service_tier");
+			await harness.command.handler("status", harness.context);
+			expect(harness.notifications.at(-1)?.message).toContain(
+				`Fast mode is on for openai-codex/${id}`,
+			);
+		},
+	);
+
+	it.each(["gpt-6", "gpt-6-future", "gpt-6-sol-preview"])(
+		"keeps Fast mode inactive on unsupported %s",
+		async (id) => {
+			const harness = await createHarness({ modelId: id });
+			await harness.emit("session_start", { type: "session_start" });
+			await harness.command.handler("on", harness.context);
+
+			expect(harness.notifications.at(-1)?.message).toContain("is not eligible");
+			expect(harness.statuses.get("codex-fast-mode")).toBe("⚡ fast (inactive)");
+			expect(
+				await harness.emit("before_provider_request", {
+					type: "before_provider_request",
+					payload: { model: id },
+				}),
+			).toBeUndefined();
+		},
+	);
 
 	it("disables, persists, clears status, and stops modifying requests", async () => {
 		const harness = await createHarness();

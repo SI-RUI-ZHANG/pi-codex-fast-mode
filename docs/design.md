@@ -44,7 +44,7 @@ Before each provider request:
 
 1. Exit without returning a payload when the preference is off.
 2. Require provider `openai-codex`.
-3. Require a GPT-5.4, GPT-5.5, or GPT-5.6 model ID.
+3. Require a GPT-5.4, GPT-5.5, or GPT-5.6 model ID, or exactly `gpt-6-sol`, `gpt-6-luna`, or `gpt-6-astra`.
 4. Require a record-shaped payload.
 5. return a shallow copy with `service_tier: "priority"`.
 
@@ -66,10 +66,10 @@ The matcher is intentionally provider-scoped and family-based:
 
 ```text
 provider == openai-codex
-model    == /^gpt-5\.(4|5|6)(?:$|-)/
+model    == /^gpt-5\.(4|5|6)(?:$|-)/ or one of gpt-6-sol, gpt-6-luna, gpt-6-astra
 ```
 
-This accepts named variants such as `gpt-5.6-sol` without maintaining a brittle variant allowlist. Expanding to another family requires a source-backed code change and release.
+The GPT-5 family matcher accepts named variants such as `gpt-5.6-sol`. The GPT-6 allowlist accepts only Sol, Luna, and Astra; bare `gpt-6`, `gpt-6-future`, and unlisted suffixes are not eligible. Adding another variant requires an eligibility and pricing review and a code change.
 
 The `openai` API-key provider is excluded. API Priority Processing has separate billing and operational semantics and should not be enabled implicitly by a ChatGPT Codex extension.
 
@@ -103,7 +103,7 @@ The primary command is a toggle, with explicit alternatives:
 /fast on | off | status
 ```
 
-Bare `/fast` toggles and persists the preference. `/fast on` and `/fast off` remain available for idempotent control, while `/fast status` is read-only. Because Fast mode materially increases credit consumption, every activation reports the expected speed and credit multipliers and the footer remains visible while the preference is active.
+Bare `/fast` toggles and persists the preference. `/fast on` and `/fast off` remain available for idempotent control, while `/fast status` is read-only. Because Fast mode materially increases credit consumption, eligible activation reports the expected credit multiplier (and a speed estimate only where documented); the footer remains visible while the preference is active.
 
 Messages consistently say the extension *requests* Fast mode because the backend can downgrade or reject service-tier requests.
 
@@ -162,7 +162,7 @@ Requiring `/fast on` makes paid activation unambiguous, but adds friction to the
 
 ### Generic model allowlist
 
-An unbounded `openai-codex/*` matcher could send unsupported service tiers. A documented family matcher is conservative while still accepting named variants.
+An unbounded `openai-codex/*` matcher could send unsupported service tiers. GPT-5 uses a documented family matcher, while GPT-6 uses an exact allowlist so new variants are not opted into higher credit usage implicitly.
 
 ## Verification
 

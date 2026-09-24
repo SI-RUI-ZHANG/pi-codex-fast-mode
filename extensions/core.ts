@@ -3,6 +3,7 @@ export const FAST_SERVICE_TIER = "priority";
 export const EXPECTED_SPEED_MULTIPLIER = 1.5;
 
 const SUPPORTED_MODEL_PATTERN = /^gpt-5\.(4|5|6)(?:$|-)/;
+const SUPPORTED_GPT_6_MODELS = new Set(["gpt-6-sol", "gpt-6-luna", "gpt-6-astra"]);
 
 export interface ModelDescriptor {
 	readonly provider: string;
@@ -29,8 +30,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function fastModelVersion(model: ModelDescriptor | undefined): "5.4" | "5.5" | "5.6" | undefined {
+function fastModelVersion(
+	model: ModelDescriptor | undefined,
+): "5.4" | "5.5" | "5.6" | "6" | undefined {
 	if (!model || model.provider !== CODEX_PROVIDER) return undefined;
+	if (SUPPORTED_GPT_6_MODELS.has(model.id)) return "6";
 	const match = SUPPORTED_MODEL_PATTERN.exec(model.id);
 	const version = match?.[1];
 	if (version === "4") return "5.4";
@@ -46,8 +50,13 @@ export function isFastEligible(model: ModelDescriptor | undefined): boolean {
 export function getFastCreditMultiplier(model: ModelDescriptor | undefined): number | undefined {
 	const version = fastModelVersion(model);
 	if (version === "5.4") return 2;
-	if (version === "5.5" || version === "5.6") return 2.5;
+	if (version === "5.5" || version === "5.6" || version === "6") return 2.5;
 	return undefined;
+}
+
+export function getFastSpeedMultiplier(model: ModelDescriptor | undefined): number | undefined {
+	const version = fastModelVersion(model);
+	return version && version !== "6" ? EXPECTED_SPEED_MULTIPLIER : undefined;
 }
 
 export function modelReference(model: ModelDescriptor | undefined): string {
