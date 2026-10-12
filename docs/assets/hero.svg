@@ -9,7 +9,7 @@
 
   <!-- title block -->
   <text x="80" y="108" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="46" font-weight="700" fill="#e6edf3">pi-codex-fast-mode</text>
-  <text x="80" y="152" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="21" fill="#8b949e">request Codex Fast mode — and nothing else</text>
+  <text x="80" y="152" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="21" fill="#8b949e">request OpenAI Fast mode — and nothing else</text>
 
   <!-- terminal window -->
   <rect x="80" y="196" width="1040" height="368" rx="14" fill="#010409" stroke="#30363d" stroke-width="1.5"/>
@@ -22,12 +22,13 @@
   </g>
 
   <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="18">
-    <text x="112" y="318" fill="#c9d1d9">Fast mode enabled for openai-codex/gpt-5.6-sol: ~1.5× speed and ~2.5× credits.</text>
-    <text x="112" y="344" fill="#8b949e">Requests ask for service_tier=priority; the backend may downgrade them.</text>
+    <text x="112" y="318" fill="#c9d1d9">Fast mode enabled for openai/gpt-6.1-sol. No speed or cost estimate.</text>
+    <text x="112" y="344" fill="#8b949e">Requests ask for service_tier=priority; the backend may downgrade or reject.</text>
 
-    <text x="112" y="396" fill="#484f58">every outgoing request then gains exactly one field:</text>
+    <text x="112" y="396" fill="#484f58">Fast increases API charges or ChatGPT subscription usage.</text>
     <text x="112" y="432" fill="#3fb950">+   &quot;service_tier&quot;: &quot;priority&quot;</text>
 
+    <text x="112" y="460" fill="#8b949e">Saved for new chats/workers; existing runtimes keep their own state.</text>
     <text x="112" y="486" fill="#e3b341">⚡ fast</text>
     <text x="112" y="524" fill="#484f58">off by default · effort and verbosity untouched · requested, never guaranteed</text>
   </g>

@@ -1,81 +1,70 @@
 # Design
 
-## Context
+## Context and goals
 
-OpenAI Codex exposes a user-facing Fast mode that trades higher credit consumption for lower latency. In the current OpenAI Codex implementation, configuration-level `fast` maps to the request value `service_tier: "priority"`.
+OpenAI Fast processing trades higher API charges or ChatGPT subscription usage for lower latency. Pi intentionally keeps service-tier policy outside core. Its `before_provider_request` hook is the narrowest integration: transform one payload field without owning authentication, catalogs, streaming, or accounting.
 
-Pi intentionally keeps provider-specific service-tier policy outside its core abstraction. Its `before_provider_request` extension hook is the narrowest supported integration point: it can transform the final provider payload without re-registering authentication, model catalogs, streaming, or usage parsing.
+Goals:
 
-## Goals
+1. Request Fast with the smallest possible provider mutation.
+2. Support both API-key and subscription access with one explicit opt-in and clear warnings.
+3. Keep reasoning effort, verbosity, prompts, tools, and authentication independent.
+4. Scope activation to named providers and documented model IDs.
+5. Preserve package-owned state and off-by-default behavior.
+6. Remain auditable, dependency-free at runtime, and honest about backend acceptance.
 
-1. Request Codex Fast mode with the smallest possible provider mutation.
-2. Make additional credit consumption explicit and opt-in.
-3. Keep reasoning effort and response verbosity independent.
-4. Scope activation conservatively by provider and model family.
-5. Persist only package-owned state, never Pi's shared settings.
-6. Fail safely and transparently.
-7. Remain auditable and dependency-free at runtime.
+Non-goals include generic OpenAI-compatible proxy support, provider replacement, auth discrimination, guaranteed latency or billing rates, measuring the served tier, and automatic retries/fallbacks.
 
-## Non-goals
+## Architecture and eligibility
 
-- Providing a generic OpenAI API Priority Processing switch.
-- Replacing or wrapping Pi's `openai-codex` provider.
-- Optimizing response length by forcing low verbosity.
-- Adjusting reasoning effort.
-- Measuring or promising a particular latency improvement.
-- Claiming that the backend honored a requested tier.
-- Supporting arbitrary models before OpenAI documents their Fast-mode eligibility.
+`extensions/codex-fast.ts` composes pure eligibility/command/cost/payload logic in `core.ts` and versioned persistence in `state.ts`. No new extension hook or registry API is required.
 
-## Architecture
-
-The published Pi entry point is `extensions/codex-fast.ts`. It composes two small modules:
-
-- `extensions/core.ts` contains pure eligibility, command parsing, cost metadata, and payload transformation.
-- `extensions/state.ts` owns versioned persistence and atomic replacement.
-
-At startup:
-
-1. Load `<agent-dir>/state/pi-codex-fast-mode.json`.
-2. Default to off when the file is absent or invalid.
-3. Apply the process-local `--fast` override, if present.
-4. Render an active or inactive footer indicator.
+At `session_start`, load `<agent-dir>/state/pi-codex-fast-mode.json`, default off for absent/invalid state, apply the process-local `--fast` override, show a cost warning when enabled and UI is available, and update the footer.
 
 Before each provider request:
 
-1. Exit without returning a payload when the preference is off.
-2. Require provider `openai-codex`.
-3. Require a GPT-5.4, GPT-5.5, or GPT-5.6 model ID.
-4. Require a record-shaped payload.
-5. return a shallow copy with `service_tier: "priority"`.
+1. Exit without returning a payload if the preference is off.
+2. Check the selected descriptor against the route rules below.
+3. Require a record-shaped payload.
+4. On `openai`, reject a payload `model` that is exposed but differs from the selected ID.
+5. Return a shallow copy with `service_tier: "priority"`, or the original object if already Priority.
 
-Nested payload values are preserved by reference, and the incoming payload is never mutated. If the payload already requests Priority, it is returned unchanged.
+Nested values remain the same references; incoming payloads are never mutated. Disabled/ineligible/mismatched requests return nothing from the hook and leave other extensions' tiers alone.
 
-## Why the wire value is `priority`
+Route rules:
 
-The official Codex CLI presents `fast` as a user configuration value. Its `ServiceTier::request_value` implementation maps both `fast` and explicit `priority` configuration to `priority` in the provider request. Sending `service_tier: "fast"` would copy the configuration vocabulary rather than the current wire contract.
+- **Legacy `openai-codex`:** preserve the existing provider/id gate: `/^gpt-5\.(4|5|6)(?:$|-)/` or exactly `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-6.1-sol`.
+- **Built-in `openai`:** allow only those four exact GPT-6 IDs. If `api` is exposed, require `openai-responses`; if `baseUrl` is exposed, require `https://api.openai.com/v1` with an optional trailing slash. Wrong APIs, custom proxy URLs exposed in the descriptor, and arbitrary custom provider names are excluded.
+
+These optional fields are ordinary public model-descriptor properties, already present in the 0.82.1 development package; they do not require newer event metadata. Minimal provider/id descriptors and payloads without a model field remain compatible. Missing fields are not proof of a correct route. GPT-5 is not broadened to `openai`: existing Codex family evidence alone does not justify enabling the same family regex on another route. GPT-6 uses exact documented IDs, not a wildcard for variants or snapshots.
+
+### What these checks do not prove
+
+The hook observes Pi's **selected** model, not necessarily its effective request-scoped dispatch. API/base-URL checks reject visible descriptor mismatches; they do not verify the effective endpoint, provider implementation, authentication, or entitlement. Virtual selections, same-ID routing, missing metadata, request-local overrides, or a replacement provider with the same descriptor can escape the checks. The legacy route retains its original provider/id-only gate.
+
+Both API-key and subscription access are intentionally eligible; there is no auth discriminator, registry lookup, token inspection, environment-key heuristic, or credential refresh. Adding such a discriminator would neither serve the approved scope nor establish request-scoped proof. The footer/status describes the preference and descriptor eligibility, **not** backend Fast activation or billing-policy enforcement.
+
+## Evidence and wire value
+
+The existing `service_tier: "priority"` spelling is retained for both routes. OpenAI's API Fast guide documents `priority` as equivalent to `fast` for supported models. The official Codex client maps Fast to Priority too. This is not Ultrafast.
 
 References:
 
-- [OpenAI Codex speed documentation](https://developers.openai.com/codex/speed)
-- [OpenAI Codex `ServiceTier`](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/config_types.rs)
+- [Codex speed and Fast eligibility](https://developers.openai.com/codex/speed)
+- [Codex model IDs](https://developers.openai.com/codex/models)
+- [API Fast mode guide and `priority`/`fast` equivalence](https://developers.openai.com/api/docs/guides/fast-mode)
+- [Direct ChatGPT-plan Responses inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
+- [Sign in with ChatGPT overview](https://developers.openai.com/siwc/token-sharing-open-source)
+- [Codex `ServiceTier::request_value`](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/config_types.rs)
 - [Pi service-tier discussion](https://github.com/earendil-works/pi/issues/4074)
 
-## Eligibility
+Responses inference support plus API Fast semantics is not a guarantee of Fast acceptance for every subscription account. The extension requests the tier and lets OpenAI enforce availability/entitlement. No live new-route acceptance, billing, or served-tier test is claimed here.
 
-The matcher is intentionally provider-scoped and family-based:
-
-```text
-provider == openai-codex
-model    == /^gpt-5\.(4|5|6)(?:$|-)/
-```
-
-This accepts named variants such as `gpt-5.6-sol` without maintaining a brittle variant allowlist. Expanding to another family requires a source-backed code change and release.
-
-The `openai` API-key provider is excluded. API Priority Processing has separate billing and operational semantics and should not be enabled implicitly by a ChatGPT Codex extension.
+Eligibility and estimates are separate. Historical GPT-5 speed/credit estimates remain strictly scoped to `openai-codex` and are labelled legacy, not guaranteed current rates. `getFastCreditMultiplier` returns `undefined` for GPT-6 and every `openai` model. GPT-6 activation/status has no invented model-specific speed/cost multiplier. API-provider messages never reuse subscription multipliers or Ultrafast figures.
 
 ## State and precedence
 
-Persistent state schema:
+Persistent schema is unchanged:
 
 ```json
 {
@@ -84,104 +73,54 @@ Persistent state schema:
 }
 ```
 
-Precedence is:
+Precedence:
 
-1. `--fast` enables Fast mode for the current process.
+1. `--fast` enables the current process without saving it.
 2. Otherwise, the saved preference applies.
 3. Missing, unreadable, malformed, or unknown-version state defaults to off.
 
-`/fast` toggles, while `/fast on`, `/fast off`, and `/fast status` provide explicit controls. All state-changing forms execute through an in-process command queue so overlapping commands have deterministic state and notifications. Persistence creates an unpredictable temporary file exclusively in the same directory, syncs it, then renames it over the preference on POSIX. Windows receives a fail-safe delete-and-rename fallback because its rename behavior differs when the destination exists; interruption in that non-atomic fallback leaves state absent, which defaults to off.
+One saved preference governs both routes for newly started chats and workers sharing the agent directory. Existing runtimes retain their own state until their own command or next `session_start`; there is no file watcher or cross-runtime broadcast. Saving off elsewhere does not disable already-running consumers. Existing saved on preferences are preserved and now cover eligible `openai` GPT-6 descriptors; the README warns users to save off before updating if that expansion is unwanted.
 
-The file contains no secrets. It is created with mode `0600` where the platform honors POSIX modes.
+`/fast` toggles, `on`/`off` are idempotent, and `status` is read-only. State-changing commands are serialized in-process so overlapping toggles have deterministic state and notifications. Writes use an unpredictable exclusive temporary file in the same directory, sync, then rename over the preference on POSIX. The Windows delete-and-rename fallback is non-atomic; interruption leaves absent state, which defaults to off. The file contains no secrets and is created with mode `0600` where supported.
 
-## Command safety
+## Warnings and command safety
 
-The primary command is a toggle, with explicit alternatives:
+Every successful on command, including one on an ineligible model, warns about **both** increased API charges and ChatGPT subscription usage and the shared saved scope. The current auth method is deliberately not guessed. Eligible messages also describe the requested tier and possible downgrade/rejection. Unknown-estimate messages are uniform on `openai` regardless of access type.
 
-```text
-/fast
-/fast on | off | status
-```
+Status while on repeats cost/scope notices without loading/saving state. Enabled startup warns when UI is available, distinguishing saved scope from the process-local `--fast` override. A failed save retains the local choice and warns that persistence failed; enabling still warns about cost. Off clears the footer and stops this runtime's mutations. Headless use has no UI notifications, so flag help and documentation also state the cost tradeoff.
 
-Bare `/fast` toggles and persists the preference. `/fast on` and `/fast off` remain available for idempotent control, while `/fast status` is read-only. Because Fast mode materially increases credit consumption, every activation reports the expected speed and credit multipliers and the footer remains visible while the preference is active.
+## Conflicts and failures
 
-Messages consistently say the extension *requests* Fast mode because the backend can downgrade or reject service-tier requests.
-
-## Conflict behavior
-
-When enabled, this package returns Priority as the tier from its own hook. If the payload already contains another `service_tier`, it is replaced and the user receives one warning per session.
-
-This does not make multiple service-tier extensions safe. The documented rule is to install only one because Pi executes hooks in load order and multiple packages may also register `/fast`.
-
-## Failure behavior
+If enabled on an eligible request, this hook replaces another tier and warns once until the next state-changing command. Multiple service-tier extensions remain unsafe: hook load order decides the final value and commands can collide. Install only one.
 
 - Missing state: default off silently.
-- Invalid or unreadable state: default off and warn in interactive UI.
-- Persistence failure: retain the user's choice for the current process and warn that it was not saved.
-- Unsupported provider/model: retain the preference but leave requests unchanged and show an inactive status.
-- Non-object payload: leave the request unchanged and warn once.
-- Existing tier conflict: replace it and warn once.
+- Invalid/unreadable state: default off and warn when UI is available.
+- Failed save: keep the process-local choice and warn, without claiming the preference was saved.
+- Unsupported descriptor or visible payload-model mismatch: keep the preference but leave the request unchanged.
+- Non-object payload: leave unchanged and warn once until the next state-changing command.
+- Existing tier conflict: replace immutably with Priority and warn once.
 
-No failure in this extension should prevent a standard provider request from proceeding.
+No automatic retry with a different tier, API key, subscription, or provider is performed.
 
-## Privacy and security
+## Privacy and packaging
 
-Runtime code:
+Runtime code accesses only its own state file, observes public model descriptors, and receives/returns the hook payload. It makes no independent network calls, spawns no subprocesses, and never logs/persists payloads, prompts, responses, headers, tokens, credentials, account IDs, or transcripts.
 
-- accesses only its versioned state file;
-- observes the provider/model identity supplied by Pi;
-- receives the final payload through Pi's request hook;
-- returns a shallow copy containing one service-tier field; and
-- performs no network calls of its own.
-
-It never logs or persists payloads, prompts, responses, headers, tokens, OAuth credentials, account identifiers, or session transcripts.
-
-The npm `files` whitelist enumerates the three runtime files plus the public design, changelog, contribution guide, security policy, README, package manifest, and license. A release script compares the dry-run tarball against that exact allowlist. Tests, private planning material, CI configuration, and local tooling are not included.
+The npm whitelist ships three runtime files and public documentation/manifest/license. `pack:check` compares the dry-run tarball with the exact allowlist; tests, private plans, CI config, and local tooling are excluded.
 
 ## Alternatives rejected
 
-### Provider replacement
-
-Re-registering `openai-codex` expands the compatibility and security surface to authentication, streaming, model metadata, and usage accounting. A final-payload hook is sufficient.
-
-### Forcing low verbosity
-
-Shorter output can reduce latency but changes model behavior and is not the Fast-mode service contract. Users control verbosity separately.
-
-### Changing reasoning effort
-
-Reasoning effort changes capability/latency tradeoffs independently of service tier. `/effort` remains untouched.
-
-### Writing Pi's shared `settings.json`
-
-Read-modify-write on a shared file risks clobbering unrelated settings and makes ownership unclear. Package state belongs in a namespaced state file.
-
-### Requiring an explicit `on` argument
-
-Requiring `/fast on` makes paid activation unambiguous, but adds friction to the primary interactive workflow. Bare `/fast` instead toggles the preference, with immediate cost messaging and a persistent footer indicator; the explicit `on`, `off`, and `status` forms remain available.
-
-### Generic model allowlist
-
-An unbounded `openai-codex/*` matcher could send unsupported service tiers. A documented family matcher is conservative while still accepting named variants.
+- **Provider replacement:** unnecessary authentication/streaming/catalog/accounting ownership.
+- **Low verbosity or reasoning changes:** independent model-behavior controls, not service tiers.
+- **Shared Pi settings writes:** risk unrelated settings; namespaced package state has clear ownership.
+- **Auth-only subscription gating:** superseded by explicit approval of both access types; would add unreliable auth snapshot checks and credential access risk.
+- **Unbounded provider/model matching:** custom names and future variants have no eligibility evidence.
+- **Broaden GPT-5 on `openai`:** defer until route-specific model eligibility is source-backed.
+- **Require new request metadata:** unavailable across the existing peer range and unnecessary for the approved auth-neutral preference; document selected-descriptor limitations instead.
+- **Require `/fast on` only:** bare toggle is retained with immediate cost/scope warnings and explicit on/off alternatives.
 
 ## Verification
 
-Automated checks cover:
+Automated coverage includes exact GPT-6 IDs on both routes; legacy GPT-5 eligibility/estimates; wrong providers, variants, APIs, proxy descriptors, and payload-model mismatches; minimal descriptors; intentional API-key/subscription parity without auth lookup; immutable payloads and existing-tier behavior; enabled/off commands and read-only status; shared preference versus existing runtime state; flag/persistence-failure warnings; and unchanged state schema/defaults, concurrent commands, POSIX modes, temporary-file collision safety, and replacement behavior.
 
-- provider/model eligibility;
-- documented credit multipliers;
-- command parsing;
-- immutable payload transformation;
-- existing-tier behavior;
-- missing, valid, malformed, and future-version state;
-- secure state-file mode on POSIX;
-- persisted command activation and deactivation;
-- ordered concurrent commands and persistence failures;
-- session-only flag activation;
-- model switching and unsupported-model inactivity;
-- invalid payload and one-time conflict warnings; and
-- exclusive temporary-file creation, replacement, and collision safety.
-
-CI runs Biome, strict TypeScript, Vitest, exact npm tarball allowlist inspection, and a production-dependency audit on supported Node versions, including a Windows job for replacement behavior.
-
-Before publishing a release, manually verify package loading in Pi, `/fast` behavior on supported and unsupported models, a redacted outgoing payload showing `service_tier: "priority"`, and final tarball contents. Never use private prompts or credentials as release evidence.
+`release:check` runs Biome, strict TypeScript, Vitest, a shipped-dependency audit, and the exact npm pack allowlist. Before publishing, manually verify package loading, supported/unsupported models, redacted outgoing Priority payloads, and final tarball contents. Any live new-route acceptance evidence must report terminal success and actual served tier where observable, not just an HTTP 200 or initial streaming bytes. Never use private prompts or credentials as release evidence.

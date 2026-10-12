@@ -17,6 +17,12 @@ import { FAST_STATE_VERSION, loadFastState, saveFastState } from "./state.ts";
 
 const STATUS_KEY = "codex-fast-mode";
 const COMMAND_VALUES = ["on", "off", "status"] as const;
+const UNKNOWN_FAST_ESTIMATE =
+	"Fast mode uses higher usage; this extension has no model-specific speed or cost estimate.";
+const FAST_COST_WARNING =
+	"Warning: Fast processing increases API charges or ChatGPT subscription usage, depending on access; rates vary.";
+const SHARED_PREFERENCE_NOTICE =
+	"Saved /fast preferences apply to newly started chats and workers sharing this agent directory; existing runtimes keep their own state.";
 
 export interface CodexFastModeDependencies {
 	getAgentDir?: () => string;
@@ -51,17 +57,21 @@ function statusMessage(enabled: boolean, model: ModelDescriptor | undefined): st
 		return "Fast mode is off. This extension is not modifying provider requests.";
 	}
 	if (!isFastEligible(model)) {
-		return `Fast preference is on, but ${modelReference(model)} is not eligible; requests are unchanged.`;
+		return `Fast preference is on, but ${modelReference(model)} is not eligible; requests are unchanged. ${FAST_COST_WARNING} ${SHARED_PREFERENCE_NOTICE}`;
 	}
-	return `Fast mode is on for ${modelReference(model)}. Requests ask for service_tier=${FAST_SERVICE_TIER}; backend acceptance is not guaranteed.`;
+	const estimate = getFastCreditMultiplier(model) === undefined ? ` ${UNKNOWN_FAST_ESTIMATE}` : "";
+	return `Fast mode is on for ${modelReference(model)}. Requests ask for service_tier=${FAST_SERVICE_TIER}; backend acceptance is not guaranteed.${estimate} ${FAST_COST_WARNING} ${SHARED_PREFERENCE_NOTICE}`;
 }
 
 function enabledMessage(model: ModelDescriptor | undefined): string {
-	const creditMultiplier = getFastCreditMultiplier(model);
-	if (!creditMultiplier) {
-		return `Fast preference enabled, but ${modelReference(model)} is not eligible; requests remain unchanged.`;
+	if (!isFastEligible(model)) {
+		return `Fast preference enabled, but ${modelReference(model)} is not eligible; requests remain unchanged. ${FAST_COST_WARNING} ${SHARED_PREFERENCE_NOTICE}`;
 	}
-	return `Fast mode enabled for ${modelReference(model)}: ~${EXPECTED_SPEED_MULTIPLIER}× speed and ~${creditMultiplier}× credits. Requests ask for service_tier=${FAST_SERVICE_TIER}; the backend may downgrade them.`;
+	const creditMultiplier = getFastCreditMultiplier(model);
+	if (creditMultiplier === undefined) {
+		return `Fast mode enabled for ${modelReference(model)}. ${UNKNOWN_FAST_ESTIMATE} Requests ask for service_tier=${FAST_SERVICE_TIER}; the backend may downgrade or reject them. ${FAST_COST_WARNING} ${SHARED_PREFERENCE_NOTICE}`;
+	}
+	return `Fast mode enabled for ${modelReference(model)}: legacy Codex estimate ~${EXPECTED_SPEED_MULTIPLIER}× speed and ~${creditMultiplier}× credits (not guaranteed current rates). Requests ask for service_tier=${FAST_SERVICE_TIER}; the backend may downgrade or reject them. ${FAST_COST_WARNING} ${SHARED_PREFERENCE_NOTICE}`;
 }
 
 export function registerCodexFastMode(
@@ -83,13 +93,13 @@ export function registerCodexFastMode(
 	}
 
 	pi.registerFlag("fast", {
-		description: "Request OpenAI Codex Fast mode for this Pi process",
+		description: "Request OpenAI Fast for this process (increased API charges/subscription usage)",
 		type: "boolean",
 		default: false,
 	});
 
 	pi.registerCommand("fast", {
-		description: "Toggle Codex Fast mode (or use on, off, status)",
+		description: "Toggle OpenAI Fast (increased API charges/subscription usage; on, off, status)",
 		getArgumentCompletions: (prefix) => {
 			const normalized = prefix.trim().toLowerCase();
 			return COMMAND_VALUES.flatMap((value) =>
@@ -123,7 +133,7 @@ export function registerCodexFastMode(
 				} catch (error) {
 					const detail = error instanceof Error ? error.message : String(error);
 					ctx.ui.notify(
-						`Fast mode is ${nextEnabled ? "on" : "off"} for this process, but the preference could not be saved: ${detail}`,
+						`Fast mode is ${nextEnabled ? "on" : "off"} for this process, but the preference could not be saved: ${detail}${nextEnabled ? ` ${FAST_COST_WARNING}` : ""}`,
 						"warning",
 					);
 					return;
@@ -133,7 +143,7 @@ export function registerCodexFastMode(
 					nextEnabled
 						? enabledMessage(ctx.model)
 						: "Fast mode disabled. This extension no longer modifies provider requests.",
-					"info",
+					nextEnabled ? "warning" : "info",
 				);
 			});
 		},
@@ -144,6 +154,13 @@ export function registerCodexFastMode(
 		enabled = loaded.state.enabled;
 		if (pi.getFlag("fast") === true) enabled = true;
 		if (loaded.warning) notify(ctx, loaded.warning, "warning");
+		if (enabled) {
+			const scope =
+				pi.getFlag("fast") === true
+					? "--fast applies to this process only and is not saved."
+					: SHARED_PREFERENCE_NOTICE;
+			notify(ctx, `Fast preference is on. ${FAST_COST_WARNING} ${scope}`, "warning");
+		}
 		updateStatus(ctx, enabled);
 	});
 
